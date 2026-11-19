@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <title>Document</title>
+</head>
+<body>
+    <!DOCTYPE html>
+<html lang="et">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Valuutakursid</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+</head>
+
+<body class="bg-gray-100 text-gray-900">
+  <main class="max-w-3xl mx-auto p-4">
+
+    <h1 class="text-3xl font-bold mb-1">Valuutakursid</h1>
+    <p id="status" class="text-sm text-gray-500 mb-4">Laen kursse...</p>
+
+    <!-- 1. ÜMBERARVUTAMINE -->
+    <div class="bg-white rounded-lg border p-4 mb-4">
+      <h2 class="font-bold mb-2">Arvuta ümber</h2>
+      <div class="flex gap-3">
+        <input id="amount" type="number" value="100" class="border rounded px-3 py-2 w-full">
+        <select id="base" class="border rounded px-3 py-2"></select>
+      </div>
+    </div>
+
+    <!-- 2. OTSING JA FILTRID -->
+    <div class="bg-white rounded-lg border p-4 mb-4">
+      <h2 class="font-bold mb-2">Otsi ja filtreeri</h2>
+      <input id="search" type="text" placeholder="Otsi nime või koodi järgi (nt jeen, USD)"
+             class="border rounded px-3 py-2 w-full mb-3">
+
+      <div class="flex flex-wrap gap-3 items-center">
+        <select id="sort" class="border rounded px-3 py-2">
+          <option value="name">Järjesta nime järgi</option>
+          <option value="high">Kõrgeim kurss enne</option>
+          <option value="low">Madalaim kurss enne</option>
+        </select>
+
+        <button id="reload" class="border rounded px-3 py-2 bg-gray-50 hover:bg-gray-200">
+          Lae kursid uuesti
+        </button>
+      </div>
+    </div>
+
+    <!-- 3. TULEMUSED -->
+    <p id="count" class="text-sm text-gray-500 mb-2"></p>
+
+    <div class="bg-white rounded-lg border p-2 overflow-x-auto">
+      <table class="w-full text-left">
+        <thead class="text-sm text-gray-500">
+          <tr>
+            <th class="p-2">Kood</th>
+            <th class="p-2">Nimi</th>
+            <th class="p-2">Kurss</th>
+            <th class="p-2">Summa</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <p class="text-xs text-gray-500 mt-3">Andmed: Frankfurter API (api.frankfurter.dev)</p>
+  </main>
+
+  <script>
+    // ---------- 1. OLEK (state) ----------
+    // Siin on kõik, mida leht teab. Muudame ainult siin olevaid väärtusi.
+    const state = {
+      rates: {},          // API vastus, nt { USD: 1.08, GBP: 0.85, ... } (1 euro kohta)
+      date: "",           // millise päeva kursid need on
+      loading: true,      // kas kursse laetakse praegu
+      error: "",          // veateade, kui API ei vasta
+
+      amount: 100,
+      base: "EUR",
+      search: "",
+      sort: "name"
+    };
+
+    // ---------- 2. API PÄRING ----------
+    // async/await tähendab: "oota, kuni server vastab"
+    async function loadRates() {
+      state.loading = true;
+      state.error = "";
+      render();
+
+      try {
+        const response = await fetch("https://api.frankfurter.dev/v1/latest?base=EUR");
+
+        if (!response.ok) {
+          throw new Error("Server vastas veaga " + response.status);
+        }
+
+        const data = await response.json();   // vastus JSON-ina
+
+        state.rates = data.rates;
+        state.rates.EUR = 1;                  // API ei anna eurot ise, lisame
+        state.date = data.date;
+        fillBaseSelect();
+
+      } catch (error) {
+        state.error = "Kursse ei õnnestunud laadida. Kontrolli internetiühendust.";
+      }
+
+      state.loading = false;
+      render();
+    }
+
+    // ---------- 3. ABIFUNKTSIOONID ----------
+
+    // Valuuta nimi eesti keeles, nt "JPY" -> "Jaapani jeen"
+    const nameMaker = new Intl.DisplayNames(["et"], { type: "currency" });
+    function currencyName(code) {
+      try {
+        return nameMaker.of(code);
+      } catch (error) {
+        return code;   // kui nime ei leita, näita koodi
+      }
+    }
+
+    // Arvutab summa ühest valuutast teise (euro kaudu)
+    function convert(amount, fromCode, toCode) {
+      return amount / state.rates[fromCode] * state.rates[toCode];
+    }
+
+    // Ilus numbri kuju, nt 1234.5 -> "1 234,5"
+    function format(number) {
+      return number.toLocaleString("et-EE", { maximumFractionDigits: 4 });
+    }
+
+    // Täidab baasvaluuta valiku API-st saadud koodidega
+    function fillBaseSelect() {
+      const select = document.getElementById("base");
+      select.innerHTML = "";
+      Object.keys(state.rates).sort().forEach(function (code) {
+        select.innerHTML += "<option>" + code + "</option>";
+      });
+      select.value = state.base;
+    }
+
+    // Annab ainult need valuutad, mis kasutaja filtritele sobivad
+    function getVisibleCodes() {
+      let codes = Object.keys(state.rates);
+
+      // Võta ära baasvaluuta ise
+      codes = codes.filter(function (code) { return code !== state.base; });
+
+      // Otsing (koodi või nime järgi)
+      if (state.search !== "") {
+        const text = state.search.toLowerCase();
+        codes = codes.filter(function (code) {
+          return code.toLowerCase().includes(text) ||
+                 currencyName(code).toLowerCase().includes(text);
+        });
+      }
+
+      codes.sort(function (a, b) {
+        if (state.sort === "name") {
+          return currencyName(a).localeCompare(currencyName(b), "et");
+        }
+        if (state.sort === "high") {
+          return convert(1, state.base, b) - convert(1, state.base, a);
+        }
+        if (state.sort === "low") {
+          return convert(1, state.base, a) - convert(1, state.base, b);
+        }
+        return currencyName(a).localeCompare(currencyName(b), "et");
+      });
+
+      return codes;
+    }
+
+    function render() {
+      const status = document.getElementById("status");
+      const rows = document.getElementById("rows");
+      const count = document.getElementById("count");
+
+      // Olekud: laeb / viga / valmis
+      if (state.loading) {
+        status.textContent = "Laen kursse...";
+        status.className = "text-sm text-gray-500 mb-4";
+        count.textContent = "";
+        rows.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-500">Laen...</td></tr>';
+        return;
+      }
+
+      if (state.error !== "") {
+        status.textContent = state.error;
+        status.className = "text-sm text-red-600 mb-4";
+        count.textContent = "";
+        rows.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-red-600">Andmeid pole. Proovi "Lae kursid uuesti".</td></tr>';
+        return;
+      }
+
+      status.textContent = "Kursid kuupäevast " + state.date;
+      status.className = "text-sm text-gray-500 mb-4";
+
+      const codes = getVisibleCodes();
+      count.textContent = "Näitan " + codes.length + " valuutat (baas: " + state.base + ")";
+
+      let html = "";
+      codes.forEach(function (code) {
+        html += `
+          <tr class="border-t">
+            <td class="p-2 font-bold">${code}</td>
+            <td class="p-2">${currencyName(code)}</td>
+            <td class="p-2">${format(convert(1, state.base, code))}</td>
+            <td class="p-2">${format(convert(state.amount, state.base, code))}</td>
+          </tr>`;
+      });
+
+      if (html === "") {
+        html = '<tr><td colspan="4" class="p-4 text-center text-gray-500">Midagi ei leitud.</td></tr>';
+      }
+      rows.innerHTML = html;
+    }
+
+
+    document.getElementById("amount").addEventListener("input", function (e) {
+      state.amount = Number(e.target.value);
+      render();
+    });
+
+    document.getElementById("base").addEventListener("change", function (e) {
+      state.base = e.target.value;
+      render();
+    });
+
+    document.getElementById("search").addEventListener("input", function (e) {
+      state.search = e.target.value;
+      render();
+    });
+
+    document.getElementById("sort").addEventListener("change", function (e) {
+      state.sort = e.target.value;
+      render();
+    });
+
+    document.getElementById("reload").addEventListener("click", loadRates);
+
+    loadRates();   
+  </script>
+</body>
+</html>
+</body>
+</html>
